@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8" />
+    <title>Comércio Exterior do Brasil - 2025</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: sans-serif; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;   
+            z-index: 1000;
+            background: #fff;
+            padding: 8px 12px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            font-family: sans-serif;
+        }
+
+        #main { width: 100vw; height: 100vh; }
+        label { margin-right: 8px; font-weight: 600; }
+    </style>
+</head>
+<body style="background-color:#f4f4f4;">
+    <div id="controls">
+        <label for="dataset">Dados:</label>
+        <select id="dataset">
+            <option value="BAL">Balança (saldo)</option>
+            <option value="EXP">Exportações</option>
+            <option value="IMP">Importações</option>
+        </select>
+    </div>
+
+    <div id="main"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/map/js/world.js"></script>
+
+    <script>
+(async function() {
+    try {
+        const resp = await fetch("BR-exportacoes_importacoes_2025.json");
+        const json = await resp.json();
+
+        const year = "2025";
+        const datasets = {
+            BAL: (json.BAL && json.BAL[year]) ? json.BAL[year] : [],
+            EXP: (json.EXP && json.EXP[year]) ? json.EXP[year] : [],
+            IMP: (json.IMP && json.IMP[year]) ? json.IMP[year] : []
+        };
+
+        const labels = {
+            BAL: "Balança (saldo) — US$",
+            EXP: "Exportações — US$",
+            IMP: "Importações — US$"
+        };
+
+        // Paletas de cores por tipo de dado
+        const colorScales = {
+            BAL: ['#ffffff', '#004d00'], // vermelho → branco → verde
+            EXP: ['#ffffff', '#001f80'],            // branco → azul escuro
+            IMP: ['#ffffff', '#ff8c00']             // branco → laranja escuro
+        };
+
+        const myChart = echarts.init(document.getElementById('main'));
+
+        function formatTooltipValue(v) {
+            if (!Number.isFinite(v)) return 'sem dados';
+            return `US$ ${(v / 1e9).toFixed(2)} Bi`;
+        }
+
+        function updateChart(datasetKey) {
+            const arr = datasets[datasetKey] || [];
+            const chartData = arr.map(c => ({
+                name: c.name,
+                value: (typeof c.us_value === 'number') ? c.us_value : null
+            }));
+
+            const values = chartData.map(d => d.value).filter(v => Number.isFinite(v));
+            const minVal = values.length ? Math.min(...values) : 0;
+            const maxVal = values.length ? Math.max(...values) : 1;
+
+            const option = {
+                backgroundColor: '#404a59',
+                title: {
+                    text: `Brasil — ${labels[datasetKey]} (2025)`,
+                    left: 'center',
+                    top: 'top',
+                    textStyle: { color: '#fff' }
+                },
+                tooltip: {
+                    trigger: 'item',
+                    formatter: params => {
+                        if (!Number.isFinite(params.value)) return `${params.name}: sem dados`;
+                        return `${params.name}<br/>${labels[datasetKey]}: ${formatTooltipValue(params.value)}`;
+                    }
+                },
+                visualMap: {
+                    min: minVal,
+                    max: maxVal,
+                    left: 'left',
+                    bottom: '10%',
+                    text: ['Maior', 'Menor'],
+                    textStyle: { color: '#fff' },
+                    calculable: true,
+                    inRange: { color: colorScales[datasetKey] },
+                    formatter: function (value) {
+                    return (value / 1e9).toFixed(1) + ' Bi';}
+                },
+                series: [{
+                    name: labels[datasetKey],
+                    type: 'map',
+                    map: 'world',
+                    roam: true,
+                    emphasis: { itemStyle: { areaColor: '#2a333d' } },
+                    data: chartData
+                }]
+            };
+
+            myChart.setOption(option);
+        }
+
+        // inicializa com BAL
+        updateChart('BAL');
+
+        // listener do select
+        document.getElementById('dataset').addEventListener('change', function() {
+            updateChart(this.value);
+        });
+
+        window.addEventListener('resize', () => myChart.resize());
+
+    } catch (err) {
+        document.body.innerHTML = `<h1 style="color:red;">Erro ao carregar dados</h1><pre>${err.message}</pre>`;
+        console.error(err);
+    }
+})();
+</script>
+</body>
+</html>
