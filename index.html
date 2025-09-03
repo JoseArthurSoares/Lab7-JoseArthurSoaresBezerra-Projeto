@@ -2,139 +2,161 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8" />
-    <title>Comércio Exterior do Brasil - 2025</title>
+    <title>Comércio Exterior do Brasil</title>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: sans-serif; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: sans-serif; background-color: #f4f4f4;}
+        .chart-container { width: 100%; }
+        #mapChart { height: 60vh; }
+        #lineChart { height: 40vh; }
         #controls {
             position: absolute;
             top: 10px;
-            right: 10px;   
+            right: 10px;
             z-index: 1000;
-            background: #fff;
+            background: rgba(255, 255, 255, 0.9);
             padding: 8px 12px;
             border-radius: 6px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            font-family: sans-serif;
+            display: flex;
+            gap: 15px;
         }
-
-        #main { width: 100vw; height: 100vh; }
-        label { margin-right: 8px; font-weight: 600; }
+        .control-group label { margin-right: 5px; font-weight: 600; font-size: 14px; }
+        .control-group select { padding: 4px; border-radius: 4px; border: 1px solid #ccc; }
     </style>
 </head>
-<body style="background-color:#f4f4f4;">
-    <div id="controls">
-        <label for="dataset">Dados:</label>
+<body>
+<div id="controls">
+    <div class="control-group">
+        <label for="dataset">Dados (Mapa):</label>
         <select id="dataset">
             <option value="BAL">Balança (saldo)</option>
             <option value="EXP">Exportações</option>
             <option value="IMP">Importações</option>
         </select>
     </div>
+    <div class="control-group">
+        <label for="metric">Métrica (Ambos):</label>
+        <select id="metric">
+            <option value="us_value">Valor (US$)</option>
+            <option value="kg_weight">Peso (kg)</option>
+        </select>
+    </div>
+</div>
 
-    <div id="main"></div>
+<div id="mapChart" class="chart-container"></div>
+<div id="lineChart" class="chart-container"></div>
 
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts/map/js/world.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts/map/js/world.js"></script>
 
-    <script>
-(async function() {
-    try {
-        const resp = await fetch("BR-exportacoes_importacoes_2025.json");
-        const json = await resp.json();
+<script>
+    (async function() {
+        try {
+            const resp = await fetch("BR-exportacoes_importacoes_2025.json");
+            if (!resp.ok) throw new Error(`Erro ao carregar o ficheiro: ${resp.statusText}`);
+            const json = await resp.json();
 
-        const year = "2025";
-        const datasets = {
-            BAL: (json.BAL && json.BAL[year]) ? json.BAL[year] : [],
-            EXP: (json.EXP && json.EXP[year]) ? json.EXP[year] : [],
-            IMP: (json.IMP && json.IMP[year]) ? json.IMP[year] : []
-        };
+            const mapChart = echarts.init(document.getElementById('mapChart'));
+            const lineChart = echarts.init(document.getElementById('lineChart'));
 
-        const labels = {
-            BAL: "Balança (saldo) — US$",
-            EXP: "Exportações — US$",
-            IMP: "Importações — US$"
-        };
+            const years = Object.keys(json.EXP || {}).sort();
+            const yearlyTotals = { us_value: { EXP: [], IMP: [], BAL: [] }, kg_weight: { EXP: [], IMP: [], BAL: [] } };
 
-        // Paletas de cores por tipo de dado
-        const colorScales = {
-            BAL: ['#ffffff', '#004d00'], // vermelho → branco → verde
-            EXP: ['#ffffff', '#001f80'],            // branco → azul escuro
-            IMP: ['#ffffff', '#ff8c00']             // branco → laranja escuro
-        };
+            years.forEach(year => {
+                ['us_value', 'kg_weight'].forEach(metric => {
+                    ['EXP', 'IMP', 'BAL'].forEach(type => {
+                        const total = (json[type][year] || []).reduce((sum, country) => sum + (country[metric] || 0), 0);
+                        yearlyTotals[metric][type].push(total);
+                    });
+                });
+            });
 
-        const myChart = echarts.init(document.getElementById('main'));
+            function formatValue(v, unit) {
+                if (!Number.isFinite(v)) return 'sem dados';
+                const absV = Math.abs(v);
+                let formatted, suffix;
+                if (unit === 'US$') {
+                    if (absV >= 1e9) { formatted = (v / 1e9).toFixed(2); suffix = ' Bi'; }
+                    else { formatted = (v / 1e6).toFixed(2); suffix = ' Mi'; }
+                    return `US$ ${formatted}${suffix}`;
+                } else {
+                    if (absV >= 1e9) { formatted = (v / 1e9).toFixed(2); suffix = ' M t'; }
+                    else { formatted = (v / 1e6).toFixed(2); suffix = ' mil t'; }
+                    return `${formatted}${suffix}`;
+                }
+            }
 
-        function formatTooltipValue(v) {
-            if (!Number.isFinite(v)) return 'sem dados';
-            return `US$ ${(v / 1e9).toFixed(2)} Bi`;
+            function updateCharts() {
+                const metricKey = document.getElementById('metric').value;
+                const datasetKey = document.getElementById('dataset').value;
+                updateMapChart(metricKey, datasetKey);
+                updateLineChart(metricKey);
+            }
+
+            function updateMapChart(metricKey, datasetKey) {
+                const year = "2025";
+                const chartData = (json[datasetKey][year] || []).map(c => ({ name: c.name, value: c[metricKey] }));
+                const values = chartData.map(d => d.value).filter(v => Number.isFinite(v));
+                const maxVal = values.length ? Math.max(...values) : 1;
+                const minVal = values.length ? Math.min(...values) : 0;
+
+                const labels = { BAL: "Balança (saldo)", EXP: "Exportações", IMP: "Importações" };
+                const colorScales = {
+                    BAL: ['#d73027', '#ffffbf', '#1a9850'], EXP: ['#ffffcc', '#253494'], IMP: ['#fee8c8', '#b30000']
+                };
+
+                mapChart.setOption({
+                    backgroundColor: '#404a59',
+                    title: {
+                        text: `Brasil — ${labels[datasetKey]} por ${metricKey === 'us_value' ? 'Valor' : 'Peso'} (2025)`,
+                        left: 'center', top: 'top', textStyle: { color: '#fff' }
+                    },
+                    tooltip: { trigger: 'item', formatter: params => `${params.name}<br/>${labels[datasetKey]}: ${formatValue(params.value, metricKey === 'us_value' ? 'US$' : 'kg')}` },
+                    visualMap: {
+                        min: datasetKey === 'BAL' ? -Math.max(Math.abs(minVal), Math.abs(maxVal)) : minVal,
+                        max: datasetKey === 'BAL' ? Math.max(Math.abs(minVal), Math.abs(maxVal)) : maxVal,
+                        left: 'left', bottom: '10%', text: ['Maior', 'Menor'], textStyle: { color: '#fff' }, calculable: true,
+                        inRange: { color: colorScales[datasetKey] },
+                        // LINHA ADICIONADA PARA FORMATAR A LEGENDA
+                        formatter: value => formatValue(value, metricKey === 'us_value' ? 'US$' : 'kg')
+                    },
+                    series: [{ type: 'map', map: 'world', roam: true, data: chartData, itemStyle: { areaColor: '#666' } }]
+                }, true);
+            }
+
+            function updateLineChart(metricKey) {
+                lineChart.setOption({
+                    backgroundColor: '#ffffff',
+                    title: { text: `Histórico do Comércio Exterior Brasileiro por ${metricKey === 'us_value' ? 'Valor (US$)' : 'Peso (kg)'}`, left: 'center', top: 10 },
+                    tooltip: { trigger: 'axis' },
+                    legend: { data: ['Exportações', 'Importações', 'Balança'], top: 40 },
+                    grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+                    xAxis: { type: 'category', boundaryGap: false, data: years },
+                    yAxis: { type: 'value', axisLabel: { formatter: val => formatValue(val, metricKey === 'us_value' ? 'US$' : 'kg').replace(/US\$|\s/g, '') } },
+                    dataZoom: [{ type: 'inside' }, { type: 'slider' }],
+                    series: [
+                        { name: 'Exportações', type: 'line', smooth: true, data: yearlyTotals[metricKey].EXP },
+                        { name: 'Importações', type: 'line', smooth: true, data: yearlyTotals[metricKey].IMP },
+                        { name: 'Balança', type: 'line', smooth: true, data: yearlyTotals[metricKey].BAL }
+                    ]
+                }, true);
+            }
+
+            document.getElementById('dataset').addEventListener('change', updateCharts);
+            document.getElementById('metric').addEventListener('change', updateCharts);
+
+            updateCharts();
+
+            window.addEventListener('resize', () => {
+                mapChart.resize();
+                lineChart.resize();
+            });
+
+        } catch (err) {
+            document.body.innerHTML = `<div style="padding: 20px;"><h1>Erro ao Carregar Dados</h1><pre>${err.message}</pre></div>`;
+            console.error(err);
         }
-
-        function updateChart(datasetKey) {
-            const arr = datasets[datasetKey] || [];
-            const chartData = arr.map(c => ({
-                name: c.name,
-                value: (typeof c.us_value === 'number') ? c.us_value : null
-            }));
-
-            const values = chartData.map(d => d.value).filter(v => Number.isFinite(v));
-            const minVal = values.length ? Math.min(...values) : 0;
-            const maxVal = values.length ? Math.max(...values) : 1;
-
-            const option = {
-                backgroundColor: '#404a59',
-                title: {
-                    text: `Brasil — ${labels[datasetKey]} (2025)`,
-                    left: 'center',
-                    top: 'top',
-                    textStyle: { color: '#fff' }
-                },
-                tooltip: {
-                    trigger: 'item',
-                    formatter: params => {
-                        if (!Number.isFinite(params.value)) return `${params.name}: sem dados`;
-                        return `${params.name}<br/>${labels[datasetKey]}: ${formatTooltipValue(params.value)}`;
-                    }
-                },
-                visualMap: {
-                    min: minVal,
-                    max: maxVal,
-                    left: 'left',
-                    bottom: '10%',
-                    text: ['Maior', 'Menor'],
-                    textStyle: { color: '#fff' },
-                    calculable: true,
-                    inRange: { color: colorScales[datasetKey] },
-                    formatter: function (value) {
-                    return (value / 1e9).toFixed(1) + ' Bi';}
-                },
-                series: [{
-                    name: labels[datasetKey],
-                    type: 'map',
-                    map: 'world',
-                    roam: true,
-                    emphasis: { itemStyle: { areaColor: '#2a333d' } },
-                    data: chartData
-                }]
-            };
-
-            myChart.setOption(option);
-        }
-
-        // inicializa com BAL
-        updateChart('BAL');
-
-        // listener do select
-        document.getElementById('dataset').addEventListener('change', function() {
-            updateChart(this.value);
-        });
-
-        window.addEventListener('resize', () => myChart.resize());
-
-    } catch (err) {
-        document.body.innerHTML = `<h1 style="color:red;">Erro ao carregar dados</h1><pre>${err.message}</pre>`;
-        console.error(err);
-    }
-})();
+    })();
 </script>
 </body>
 </html>
